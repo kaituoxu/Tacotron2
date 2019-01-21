@@ -1,0 +1,8 @@
+*.pyc
+
+# MISC
+.nfs*
+.vscode
+__pycache__
+.DS_Store
+nohup.out
