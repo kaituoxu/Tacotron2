@@ -9,10 +9,11 @@ from scipy import signal
 
 from scipy.io import wavfile
 
-import audio_hparams as hparams
+import hyperparams as hparams
 
 
 def load_wav(path, sr):
+    # Maybe use scipy.io.wavfile.read() + norm(divide max int16) to impl this?
     return librosa.core.load(path, sr=sr)[0]
 
 
@@ -79,12 +80,14 @@ def _mel_to_linear(mel_spectrogram):
     global _inv_mel_basis
     if _inv_mel_basis is None:
         _inv_mel_basis = np.linalg.pinv(_build_mel_basis())
-    return np.maximum(1e-10, np.dot(_inv_mel_basis, mel_spectrogram))
+    # return np.maximum(1e-10, np.dot(_inv_mel_basis, mel_spectrogram))
+    return np.maximum(hparams.floor_freq, np.dot(_inv_mel_basis, mel_spectrogram))
 
 
 def _build_mel_basis():
-    n_fft = (hparams.num_freq - 1) * 2
-    return librosa.filters.mel(hparams.sample_rate, n_fft, n_mels=hparams.num_mels)
+    # n_fft = (hparams.num_freq - 1) * 2
+    # return librosa.filters.mel(hparams.sample_rate, n_fft, n_mels=hparams.num_mels)
+    return librosa.filters.mel(hparams.sample_rate, n_fft=hparams.fft_size, n_mels=hparams.num_mels, fmin=hparams.min_freq, fmax=hparams.max_freq)
 
 
 def _amp_to_db(x):
