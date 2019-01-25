@@ -121,11 +121,10 @@ class TextAudioCollate(object):
         Returns:
             text_padded: [N, Ti]
             input_lengths: [N]
-            mel_padded: [N, D, To]
+            mel_padded: [N, To, D]
             gate_padded: [N, To]
             output_lengths: [N]
         """
-        # print(batch)
         # Right zero-pad all one-hot text sequences to max input length
         input_lengths, ids_sorted_decreasing = torch.sort(
             torch.LongTensor([len(x[0]) for x in batch]),
@@ -156,6 +155,7 @@ class TextAudioCollate(object):
             mel_padded[i, :, :mel.size(1)] = mel
             gate_padded[i, mel.size(1)-1:] = 1
             output_lengths[i] = mel.size(1)
+        mel_padded.transpose(1, 2)  # [N, To, D]
 
         # print(text_padded.size(), input_lengths.size(), mel_padded.size(), gate_padded.size(), output_lengths.size())
         return text_padded, input_lengths, mel_padded, gate_padded, output_lengths

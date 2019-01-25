@@ -20,5 +20,12 @@ power = 1.5
 fft_size = 1024
 hop_size = 256
 
+# Encoder
+num_chars = len(chars) + 1  # + 1 is <unk>
+padding_idx = chars.find(pad)
+
+# Decoder
+feature_dim = 513
+
 # Eval:
 griffin_lim_iters = 60
