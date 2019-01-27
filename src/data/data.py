@@ -43,7 +43,7 @@ class LJSpeechDataset(data.Dataset):
         """
         text = self._get_text(index)
         audio = self._get_audio(index)
-        print(text.size(), audio.size())
+        # print(text.size(), audio.size())
         return text, audio
 
     def __len__(self):
@@ -53,7 +53,8 @@ class LJSpeechDataset(data.Dataset):
         text = self.metadata.iloc[index]['norm_text']
         if self.text_transformer:
             text = self.text_transformer(text)
-        return torch.IntTensor(text)
+            text = torch.IntTensor(text)
+        return text
 
     def _get_audio(self, index):
         filename = self.metadata.iloc[index]['wav']
@@ -155,7 +156,7 @@ class TextAudioCollate(object):
             mel_padded[i, :, :mel.size(1)] = mel
             gate_padded[i, mel.size(1)-1:] = 1
             output_lengths[i] = mel.size(1)
-        mel_padded.transpose(1, 2)  # [N, To, D]
+        mel_padded = mel_padded.transpose(1, 2)  # [N, To, D]
 
         # print(text_padded.size(), input_lengths.size(), mel_padded.size(), gate_padded.size(), output_lengths.size())
         return text_padded, input_lengths, mel_padded, gate_padded, output_lengths

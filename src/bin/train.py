@@ -30,5 +30,5 @@ if __name__ == '__main__':
     print("*"*80)
     for i, batch in enumerate(dataloader):
         print(i, batch)
-        if i == 10:
+        if i == 20:
             break

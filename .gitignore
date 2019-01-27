@@ -5,6 +5,7 @@
 00000*.mel.wav
 
 # MISC
+temp
 .nfs*
 .vscode
 __pycache__

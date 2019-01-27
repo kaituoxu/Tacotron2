@@ -157,7 +157,7 @@ class Decoder(nn.Module):
             # concate s_i and c_i, and input to linear transform
             linear_input = torch.cat((rnn_output, attention_context), dim=1)
             feat_output = self.feature_linear(linear_input)
-            stop_token = torch.sigmoid(self.stop_linear(linear_input))
+            stop_token = self.stop_linear(linear_input)
             # record
             feat_outputs += [feat_output]
             stop_tokens += [stop_token]
@@ -180,7 +180,7 @@ class Decoder(nn.Module):
         feat_outputs = feat_outputs.masked_fill(decoder_mask, 0.0)
         feat_residual_outputs = feat_residual_outputs.masked_fill(decoder_mask, 0.0)
         attention_weights = attention_weights.masked_fill(decoder_mask, 0.0)
-        stop_tokens = stop_tokens.masked_fill(decoder_mask.squeeze(-1), 1)
+        stop_tokens = stop_tokens.masked_fill(decoder_mask.squeeze(-1), 1e3)  # sigmoid(1e3) = 1, log(1) = 0
         return feat_outputs, feat_residual_outputs, stop_tokens, attention_weights
 
     def _init(self, feat_padded, encoder_lengths, feat_lengths):
