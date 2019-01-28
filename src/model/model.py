@@ -15,7 +15,8 @@ class FeaturePredictNet(nn.Module):
                  encoder_hidden_size=256, bidirectional=True,
                  prenet_dim=256, decoder_hidden_size=1024,
                  attention_dim=128, location_feature_dim=32,
-                 postnet_num_convs=5, postnet_filter_size=512, postnet_kernel_size=5):
+                 postnet_num_convs=5, postnet_filter_size=512, postnet_kernel_size=5,
+                 max_decoder_steps=1000):
         super(FeaturePredictNet, self).__init__()
         # Hyperparameter
         self.num_chars, self.padding_idx, self.feature_dim = num_chars, padding_idx, feature_dim
@@ -32,15 +33,19 @@ class FeaturePredictNet(nn.Module):
         self.decoder = Decoder(feature_dim, encoder_hidden_size,
                                prenet_dim, decoder_hidden_size,
                                attention_dim, location_feature_dim,
-                               postnet_num_convs, postnet_filter_size, postnet_kernel_size)
+                               postnet_num_convs, postnet_filter_size, postnet_kernel_size,
+                               max_decoder_steps)
 
     def forward(self, text_padded, input_lengths, feat_padded, feat_lengths):
         encoder_padded_outputs = self.encoder(text_padded, input_lengths)
-        # print("encoder")
-        # print(encoder_padded_outputs)
-        # print(encoder_padded_outputs.size())
         feat_outputs, feat_residual_outputs, stop_tokens, attention_weights \
-            = self.decoder(feat_padded, encoder_padded_outputs, input_lengths,feat_lengths)
+            = self.decoder(encoder_padded_outputs, input_lengths, feat_padded, feat_lengths)
+        return feat_outputs, feat_residual_outputs, stop_tokens, attention_weights
+
+    def inference(self, text_padded, input_lengths):
+        encoder_padded_outputs = self.encoder(text_padded, input_lengths)
+        feat_outputs, feat_residual_outputs, stop_tokens, attention_weights \
+            = self.decoder.inference(encoder_padded_outputs, input_lengths)
         return feat_outputs, feat_residual_outputs, stop_tokens, attention_weights
 
     @classmethod
@@ -133,11 +138,13 @@ class Decoder(nn.Module):
 
     def __init__(self, feature_dim, encoder_hidden_size=512, prenet_dim=256,
                  decoder_hidden_size=1024, attention_dim=128, location_feature_dim=32,
-                 postnet_num_convs=5, postnet_filter_size=512, postnet_kernel_size=5):
+                 postnet_num_convs=5, postnet_filter_size=512, postnet_kernel_size=5,
+                 max_decoder_steps=1000):
         super(Decoder, self).__init__()
+        self.feature_dim = feature_dim
         self.encoder_hidden_size = encoder_hidden_size
-        self.prenet_dim = prenet_dim
         self.decoder_hidden_size = decoder_hidden_size
+        self.max_decoder_steps = max_decoder_steps
         # Components
         # "The prediction from the previous time step is first passed through a small pre-net containing 2 fully connected layers of 256 hidden ReLU units. We found that the pre-net acting as an information bottleneck was essential for learning attention."
         self.prenet = PreNet(feature_dim, prenet_dim)
@@ -159,47 +166,31 @@ class Decoder(nn.Module):
         self.postnet = PostNet(feature_dim, postnet_num_convs,
                                postnet_filter_size, postnet_kernel_size)
 
-    def forward(self, feat_padded, encoder_padded_outputs, encoder_lengths,
-                feat_lengths):
-        """
+    def forward(self, encoder_padded_outputs, encoder_lengths,
+                feat_padded, feat_lengths):
+        """TODO: merge forward() and inference() or not?
         Args:
             feat_padded: [N, To, D]
             encoder_padded_outputs: [N, Ti, H]
             encoder_lengths: [N]
         Returns:
         """
-        expand_feat, h_list, c_list, attention_context, \
-            cumulative_attention_weight, encoder_mask, decoder_mask, To \
-            = self._init(feat_padded, encoder_lengths, feat_lengths)
+        # Init
+        # expand feat with go frame
+        go_frame = self._init_go_frame(encoder_padded_outputs)
+        expand_feat = torch.cat((go_frame, feat_padded), dim=1) #[N, To+1, D]
+        # init rnn state and attention
+        self._init_state(encoder_padded_outputs, encoder_lengths)
 
-        # print('expand_feat', expand_feat.size())
-        # print('expand_feat', expand_feat)
-        prenet_out = self.prenet(expand_feat) #[N, To, P]
-        # print('prenet_out', prenet_out.size())
+        # Forward
         feat_outputs, stop_tokens, attention_weights = [], [], []
+        To = feat_padded.size(1)
+        prenet_out = self.prenet(expand_feat) #[N, To+1, P]
         for t in range(To):
-            # print(f't={t}')
             if t == 0:
                 self.attention.reset()
-            # decoder RNN: s_i = RNN(s_i−1,y_i−1,c_i−1)
-            rnn_input = torch.cat((prenet_out[:, t, :], attention_context), dim=1)
-            h_list[0], c_list[0] = self.rnn[0](rnn_input, (h_list[0], c_list[0]))
-            h_list[1], c_list[1] = self.rnn[1](h_list[0], (h_list[1], c_list[1]))
-            rnn_output = h_list[1]
-            # attention: c_i = LocationSensitiveAttention(s_i, h, ca_i-1)
-            attention_context, attention_weight = self.attention(rnn_output,
-                                                                 encoder_padded_outputs,
-                                                                 cumulative_attention_weight,
-                                                                 mask=encoder_mask)
-            # NOTE HERE!!! Here maybe exists a bug?
-            # Below causa issue "one of the variables needed for gradient computation has been modified by an inplace operation"
-            # cumulative_attention_weight += attention_weight
-            # solution:
-            cumulative_attention_weight = cumulative_attention_weight + attention_weight
-            # concate s_i and c_i, and input to linear transform
-            linear_input = torch.cat((rnn_output, attention_context), dim=1)
-            feat_output = self.feature_linear(linear_input)
-            stop_token = self.stop_linear(linear_input)
+            step_input = prenet_out[:, t, :]
+            feat_output, stop_token, attention_weight = self._step(step_input)
             # record
             feat_outputs += [feat_output]
             stop_tokens += [stop_token]
@@ -208,16 +199,9 @@ class Decoder(nn.Module):
         stop_tokens = torch.stack(stop_tokens, dim=1).squeeze()
         attention_weights = torch.stack(attention_weights, dim=1)
         feat_residual_outputs = self.postnet(feat_outputs)
-        # print('feat_outputs', feat_outputs.size())
-        # print('feat_outputs', feat_outputs)
-        # print('stop_tokens', stop_tokens.size())
-        # print('stop_tokens', stop_tokens)
-        # print('attention weights', attention_weights.size())
-        # print('attention weights', attention_weights)
-        # print('feat_residual_outputs', feat_residual_outputs.size())
-        # print('feat_residual_outputs', feat_residual_outputs)
-        # print('decoder_mask', decoder_mask)
+
         # Mask
+        decoder_mask = get_mask_from_lengths(feat_padded, feat_lengths)
         decoder_mask = decoder_mask.unsqueeze(-1) # [N, To, 1]
         feat_outputs = feat_outputs.masked_fill(decoder_mask, 0.0)
         feat_residual_outputs = feat_residual_outputs.masked_fill(decoder_mask, 0.0)
@@ -225,29 +209,83 @@ class Decoder(nn.Module):
         stop_tokens = stop_tokens.masked_fill(decoder_mask.squeeze(-1), 1e3)  # sigmoid(1e3) = 1, log(1) = 0
         return feat_outputs, feat_residual_outputs, stop_tokens, attention_weights
 
-    def _init(self, feat_padded, encoder_lengths, feat_lengths):
-        """
-        Args:
-            feat_padded: [N, To, D]
-        """
-        N, To, D = feat_padded.size()
-        Ti = torch.max(encoder_lengths).item()
-        # Generate <go> frame
-        go_frame = feat_padded.new_zeros(N, 1, D)
-        expand_feat = torch.cat((go_frame, feat_padded), dim=1) #[N, To+1, D]
+    def inference(self, encoder_padded_outputs, encoder_lengths):
+        """Inference one utterance."""
+        # Init
+        # get go frame
+        go_frame = self._init_go_frame(encoder_padded_outputs).squeeze(1)
+        # init rnn state and attention
+        self._init_state(encoder_padded_outputs, encoder_lengths)
+
+        # Forward
+        feat_outputs, stop_tokens, attention_weights = [], [], []
+        step_input = go_frame
+        self.attention.reset()
+        while True:
+            step_input = self.prenet(step_input)
+            feat_output, stop_token, attention_weight = self._step(step_input)
+            # record
+            feat_outputs += [feat_output]
+            stop_tokens += [stop_token]
+            attention_weights += [attention_weight]
+            # terminate?
+            if torch.sigmoid(stop_token) > 0.5:
+                break
+            elif len(feat_outputs) == self.max_decoder_steps:
+                print("Warning! Reached max decoder steps")
+                break
+            # autoregressive
+            step_input = feat_output
+        feat_outputs = torch.stack(feat_outputs, dim=1)
+        stop_tokens = torch.stack(stop_tokens, dim=1).squeeze()
+        attention_weights = torch.stack(attention_weights, dim=1)
+        feat_residual_outputs = self.postnet(feat_outputs)
+        return feat_outputs, feat_residual_outputs, stop_tokens, attention_weights
+
+    def _init_go_frame(self, tensor):
+        """tensor: [N, ...]"""
+        N = tensor.size(0)
+        go_frame = tensor.new_zeros(N, 1, self.feature_dim)
+        return go_frame
+
+    def _init_state(self, encoder_padded_outputs, lengths):
+        """encoder_padded_outputs: [N, Ti, ...]"""
+        N, Ti = encoder_padded_outputs.size()[:2]
+        assert Ti == torch.max(lengths).item()
         # Init LSTMCell state
-        h_list = [feat_padded.new_zeros(N, self.decoder_hidden_size),
-                  feat_padded.new_zeros(N, self.decoder_hidden_size)]
-        c_list = [feat_padded.new_zeros(N, self.decoder_hidden_size),
-                  feat_padded.new_zeros(N, self.decoder_hidden_size)]
+        self.h_list = [encoder_padded_outputs.new_zeros(N, self.decoder_hidden_size),
+                       encoder_padded_outputs.new_zeros(N, self.decoder_hidden_size)]
+        self.c_list = [encoder_padded_outputs.new_zeros(N, self.decoder_hidden_size),
+                       encoder_padded_outputs.new_zeros(N, self.decoder_hidden_size)]
         # Init attention
-        cumulative_attention_weight = feat_padded.new_zeros(N, Ti)
-        attention_context = feat_padded.new_zeros(N, self.encoder_hidden_size)
-        # Generate mask
-        encoder_mask = get_mask_from_lengths(feat_padded, encoder_lengths)
-        decoder_mask = get_mask_from_lengths(feat_padded, feat_lengths)
-        return expand_feat, h_list, c_list, attention_context, \
-            cumulative_attention_weight, encoder_mask, decoder_mask, To
+        self.cumulative_attention_weight = encoder_padded_outputs.new_zeros(N, Ti)
+        self.attention_context = encoder_padded_outputs.new_zeros(N, self.encoder_hidden_size)
+        # Generate encoder mask
+        self.encoder_mask = get_mask_from_lengths(encoder_padded_outputs, lengths)
+        # Keep encoder_padded_outputs
+        self.encoder_padded_outputs = encoder_padded_outputs
+
+    def _step(self, step_input):
+        # decoder RNN: s_i = RNN(s_i−1,y_i−1,c_i−1)
+        rnn_input = torch.cat((step_input, self.attention_context), dim=1)
+        self.h_list[0], self.c_list[0] = self.rnn[0](rnn_input, (self.h_list[0], self.c_list[0]))
+        self.h_list[1], self.c_list[1] = self.rnn[1](self.h_list[0], (self.h_list[1], self.c_list[1]))
+        rnn_output = self.h_list[1]
+        # attention: c_i = LocationSensitiveAttention(s_i, h, ca_i-1)
+        self.attention_context, attention_weight = self.attention(rnn_output,
+                                                                  self.encoder_padded_outputs,
+                                                                  self.cumulative_attention_weight,
+                                                                  mask=self.encoder_mask)
+        # NOTE HERE!!! Here maybe exists a bug?
+        # Below causa issue "one of the variables needed for gradient computation has been modified by an inplace operation"
+        # cumulative_attention_weight += attention_weight
+        # solution:
+        self.cumulative_attention_weight = self.cumulative_attention_weight + attention_weight
+        # concate s_i and c_i, and input to linear transform
+        linear_input = torch.cat((rnn_output, self.attention_context), dim=1)
+        feat_output = self.feature_linear(linear_input)
+        stop_token = self.stop_linear(linear_input)
+        return feat_output, stop_token, attention_weight
 
 
 def get_mask_from_lengths(tensor, lengths):
@@ -271,9 +309,9 @@ class PreNet(nn.Module):
     def forward(self, x):
         """
         Args:
-            x: [N, T, D], D is input dim
+            x: [N, T, D], D is input dim / [N, D]
         Returns:
-            [N, T, H], H is hidden unit
+            [N, T, H], H is hidden unit / [N, H]
         """
         x = F.dropout(F.relu(self.linear1(x)), p=self.p, training=True)
         x = F.dropout(F.relu(self.linear2(x)), p=self.p, training=True)
@@ -441,7 +479,7 @@ if __name__ == "__main__":
     encoder_padded_outputs2 = encoder_padded_outputs.clone()
     decoder = Decoder(feature_dim)
     feat_outputs, feat_residual_outputs, stop_tokens, attention_weights \
-        = decoder(feat_padded, encoder_padded_outputs2, input_lengths, feat_lengths)
+        = decoder(encoder_padded_outputs2, input_lengths, feat_padded, feat_lengths)
     loss = nn.MSELoss()(feat_outputs, feat_padded)
     loss.backward()
     print(loss)

@@ -1,10 +1,13 @@
 *.pyc
+# exp
+exp
 
 # data
 00000*.linear.wav
 00000*.mel.wav
 
 # MISC
+text
 temp
 .nfs*
 .vscode
