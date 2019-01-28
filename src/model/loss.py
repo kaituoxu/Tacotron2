@@ -12,6 +12,8 @@ class FeaturePredictNetLoss(nn.Module):
             target: (feat_target, stop_tokens_target)
         Detail:
             stop_tokens_predict: stop_token value before sigmoid, do sigmoid in BCEWithLogitsLoss for numerical stabel
+        Returns:
+            loss: loss averaged over batch size and sequence length
         """
         feat_predict, feat_residual_predict, stop_tokens_predict, _ = input
         feat_target, stop_tokens_target = target

@@ -15,11 +15,11 @@ class FeaturePredictNet(nn.Module):
                  encoder_hidden_size=256, bidirectional=True,
                  prenet_dim=256, decoder_hidden_size=1024,
                  attention_dim=128, location_feature_dim=32,
-                 postnet_num_convs=5, postnet_filter_size=512, postnet_kernel_size=5,
-                 ):
+                 postnet_num_convs=5, postnet_filter_size=512, postnet_kernel_size=5):
         super(FeaturePredictNet, self).__init__()
         # Hyperparameter
-        self.num_chars, self.padding_idx, self.embedding_dim = num_chars, padding_idx, embedding_dim
+        self.num_chars, self.padding_idx, self.feature_dim = num_chars, padding_idx, feature_dim
+        self.embedding_dim = embedding_dim
         self.encoder_num_convs, self.kernel_size = encoder_num_convs, kernel_size
         self.encoder_hidden_size, self.bidirectional = encoder_hidden_size, bidirectional
         self.prenet_dim, self.decoder_hidden_size = prenet_dim, decoder_hidden_size
@@ -42,6 +42,44 @@ class FeaturePredictNet(nn.Module):
         feat_outputs, feat_residual_outputs, stop_tokens, attention_weights \
             = self.decoder(feat_padded, encoder_padded_outputs, input_lengths,feat_lengths)
         return feat_outputs, feat_residual_outputs, stop_tokens, attention_weights
+
+    @classmethod
+    def load_model(cls, path):
+        # Load to CPU
+        package = torch.load(path, map_location=lambda storage, loc: storage)
+        model = cls.load_model_from_package(package)
+        return model
+
+    @classmethod
+    def load_model_from_package(cls, package):
+        model = cls(package['num_chars'], package['padding_idx'], package['feature_dim'],
+                    package['embedding_dim'], package['encoder_num_convs'], package['kernel_size'],
+                    package['encoder_hidden_size'], package['bidirectional'],
+                    package['prenet_dim'], package['decoder_hidden_size'],
+                    package['attention_dim'], package['location_feature_dim'],
+                    package['postnet_num_convs'], package['postnet_filter_size'], package['postnet_kernel_size'])
+        model.load_state_dict(package['state_dict'])
+        return model
+
+    @staticmethod
+    def serialize(model, optimizer, epoch, tr_loss=None, cv_loss=None):
+        package = {
+            # hyper-parameter
+            'num_chars': model.num_chars, 'padding_idx': model.padding_idx, 'feature_dim': model.feature_dim,
+            'embedding_dim': model.embedding_dim, 'encoder_num_convs': model.encoder_num_convs, 'kernel_size': model.kernel_size,
+            'encoder_hidden_size': model.encoder_hidden_size, 'bidirectional': model.bidirectional,
+            'prenet_dim': model.prenet_dim, 'decoder_hidden_size': model.decoder_hidden_size,
+            'attention_dim': model.attention_dim, 'location_feature_dim': model.location_feature_dim,
+            'postnet_num_convs': model.postnet_num_convs, 'postnet_filter_size': model.postnet_filter_size, 'postnet_kernel_size': model.postnet_kernel_size,
+            # state
+            'state_dict': model.state_dict(),
+            'optim_dict': optimizer.state_dict(),
+            'epoch': epoch
+        }
+        if tr_loss is not None:
+            package['tr_loss'] = tr_loss
+            package['cv_loss'] = cv_loss
+        return package
 
 
 class Encoder(nn.Module):
@@ -153,7 +191,11 @@ class Decoder(nn.Module):
                                                                  encoder_padded_outputs,
                                                                  cumulative_attention_weight,
                                                                  mask=encoder_mask)
-            cumulative_attention_weight += attention_weight
+            # NOTE HERE!!! Here maybe exists a bug?
+            # Below causa issue "one of the variables needed for gradient computation has been modified by an inplace operation"
+            # cumulative_attention_weight += attention_weight
+            # solution:
+            cumulative_attention_weight = cumulative_attention_weight + attention_weight
             # concate s_i and c_i, and input to linear transform
             linear_input = torch.cat((rnn_output, attention_context), dim=1)
             feat_output = self.feature_linear(linear_input)
@@ -386,3 +428,23 @@ if __name__ == "__main__":
     print('feat_residual_outputs', feat_residual_outputs)
     print('attention weights', attention_weights.size())
     print('attention weights', attention_weights)
+
+    # Debug "one of the variables needed for gradient computation has been modified by an inplace operation"
+    encoder = Encoder(num_chars, padding_idx)
+    encoder_padded_outputs = encoder(text_padded, input_lengths)
+    encoder_padded_pred = encoder_padded_outputs.clone()
+    print('encoder_padded_outputs', encoder_padded_outputs)
+    # loss = nn.MSELoss()(encoder_padded_outputs, encoder_padded_pred)
+    # loss.backward()
+    # print(loss)
+
+    encoder_padded_outputs2 = encoder_padded_outputs.clone()
+    decoder = Decoder(feature_dim)
+    feat_outputs, feat_residual_outputs, stop_tokens, attention_weights \
+        = decoder(feat_padded, encoder_padded_outputs2, input_lengths, feat_lengths)
+    loss = nn.MSELoss()(feat_outputs, feat_padded)
+    loss.backward()
+    print(loss)
+
+    # loss = nn.MSELoss()(feat_outputs, feat_padded)
+    # loss.backward()

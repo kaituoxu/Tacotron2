@@ -19,10 +19,11 @@ from audio_process import load_wav
 
 class LJSpeechDataset(data.Dataset):
     
-    def __init__(self, path, text_transformer=None, audio_transformer=None,
+    def __init__(self, path, csv_name='metadata.csv',
+                 text_transformer=None, audio_transformer=None,
                  sample_rate=22050, sort=True):
         self.path = path
-        self.metadata = pd.read_csv(f'{path}/metadata.csv', sep='|',
+        self.metadata = pd.read_csv(f'{path}/{csv_name}', sep='|',
                                     names=['wav', 'text', 'norm_text'],
                                     usecols=['wav', 'norm_text'],
                                     quoting=csv.QUOTE_NONE)  # not ignore quote in string
@@ -187,3 +188,32 @@ if __name__ == '__main__':
     # [[0, 1], [6, 7], [4, 5], [8, 9], [2, 3]]
     # [[9], [6, 7, 8], [0, 1, 2], [3, 4, 5]]
     # [[3, 4, 5], [0, 1, 2], [6, 7, 8], [9]]
+
+    # Test DataLoader
+    from torch.utils.data import DataLoader
+    from audio_process import spectrogram
+    from text_process import text_to_sequence
+
+    dataset = LJSpeechDataset(path, text_transformer=text_to_sequence,
+                              audio_transformer=spectrogram)
+    batch_sampler = RandomBucketBatchSampler(dataset, batch_size=5, drop_last=False)
+    collate_fn = TextAudioCollate()
+    dataloader = DataLoader(dataset, batch_sampler=batch_sampler,
+                            collate_fn=collate_fn)
+
+    print("*"*80)
+    print(len(dataset))
+    for i, data in enumerate(dataset):
+        text, audio = data
+        print(i, len(text), audio.shape)
+        print(text)
+        print(audio)
+        if i == 100:
+            break
+
+    print("*"*80)
+    for i, batch in enumerate(dataloader):
+        print(i, batch)
+        if i == 20:
+            break
+
