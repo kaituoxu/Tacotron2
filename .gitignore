@@ -1,6 +1,7 @@
 *.pyc
 # exp
-exp
+exp/
+log/
 
 # data
 00000*.linear.wav

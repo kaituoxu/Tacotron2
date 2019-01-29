@@ -23,7 +23,7 @@ class Solver(object):
         self.save_folder = args.save_folder
         self.checkpoint = args.checkpoint
         self.continue_from = args.continue_from
-        # self.model_path = args.model_path
+        self.model_path = args.model_path
         # logging
         self.print_freq = args.print_freq
         # visualizing loss using visdom
@@ -48,10 +48,10 @@ class Solver(object):
         if self.continue_from:
             print('Loading checkpoint model %s' % self.continue_from)
             package = torch.load(self.continue_from)
-            if self.use_cuda:
-                self.model.module.load_state_dict(package['state_dict'])
-            else:
-                self.model.load_state_dict(package['state_dict'])
+            # if self.use_cuda:
+            #     self.model.module.load_state_dict(package['state_dict'])
+            # else:
+            self.model.load_state_dict(package['state_dict'])
             self.optimizer.load_state_dict(package['optim_dict'])
             self.start_epoch = int(package.get('epoch', 1))
             self.tr_loss[:self.start_epoch] = package['tr_loss'][:self.start_epoch]
@@ -83,19 +83,28 @@ class Solver(object):
             if self.checkpoint:
                 file_path = os.path.join(
                     self.save_folder, 'epoch%d.pth.tar' % (epoch + 1))
-                if self.use_cuda:
-                    torch.save(self.model.module.serialize(self.model.module,
-                                                        self.optimizer, epoch + 1,
-                                                        tr_loss=self.tr_loss,
-                                                        cv_loss=self.cv_loss),
-                            file_path)
-                else:
-                    torch.save(self.model.serialize(self.model,
-                                                    self.optimizer, epoch + 1,
-                                                    tr_loss=self.tr_loss,
-                                                    cv_loss=self.cv_loss),
-                            file_path)
+                # if self.use_cuda:
+                #     torch.save(self.model.module.serialize(self.model.module,
+                #                                         self.optimizer, epoch + 1,
+                #                                         tr_loss=self.tr_loss,
+                #                                         cv_loss=self.cv_loss),
+                #             file_path)
+                # else:
+                torch.save(self.model.serialize(self.model,
+                                                self.optimizer, epoch + 1,
+                                                tr_loss=self.tr_loss,
+                                                cv_loss=self.cv_loss),
+                           file_path)
                 print('Saving checkpoint model to %s' % file_path)
+            else:
+                # Save the last model
+                file_path = os.path.join(self.save_folder, self.model_path)
+                torch.save(self.model.serialize(self.model,
+                                                self.optimizer, epoch + 1,
+                                                tr_loss=self.tr_loss,
+                                                cv_loss=self.cv_loss),
+                           file_path)
+                print('Only save the last model %s' % file_path)
 
             # visualizing loss using visdom
             if self.visdom:

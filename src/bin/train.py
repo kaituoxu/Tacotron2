@@ -20,8 +20,8 @@ from text_process import text_to_sequence
 parser = argparse.ArgumentParser("Tacotron2 FeaturePredictNet Training")
 # General config
 # Task related
-parser.add_argument('--train_dir', type=str, required=True, help='dir including csv and wav')
-parser.add_argument('--train_csv', type=str, default='metadata.csv', help='csv name such metadata.csv')
+parser.add_argument('--train_dir', type=str, required=True, help='dir including wav')
+parser.add_argument('--train_csv', type=str, default='metadata.csv', help='csv file such metadata.csv')
 # Network architecture
 # We use paper config right now. If need to adjust model config, then add options.
 # Training config
@@ -35,9 +35,9 @@ parser.add_argument('--lr', default=1e-3, type=float, help='Init learning rate')
 parser.add_argument('--l2', default=0.0, type=float, help='weight decay (L2)')
 # save and load model
 parser.add_argument('--save_folder', default='exp/temp', help='Dir to save models')
-parser.add_argument('--checkpoint', default=1, type=int, help='Enables checkpoint saving of model')
+parser.add_argument('--checkpoint', default=0, type=int, help='Enables checkpoint saving of model')
 parser.add_argument('--continue_from', default='', help='Continue from checkpoint model')
-# parser.add_argument('--model_path', default='final.pth.tar', help='model name')
+parser.add_argument('--model_path', default='final.pth.tar', help='model name')
 # logging
 parser.add_argument('--print_freq', default=10, type=int, help='Frequency of printing training infomation')
 parser.add_argument('--visdom', type=int, default=0, help='Turn on visdom graphing')
@@ -59,9 +59,10 @@ def main(args):
     # Build model
     model = FeaturePredictNet(hparams.num_chars, hparams.padding_idx,
                               hparams.feature_dim)
-    print(model)
+    # print(model)
     if args.use_cuda:
-        model = torch.nn.DataParallel(model)
+        # TODO: to use below need to generate mask in data.py but not model.py
+        # model = torch.nn.DataParallel(model)
         model.cuda()
     # Build criterion
     criterion = FeaturePredictNetLoss()

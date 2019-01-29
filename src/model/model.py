@@ -124,6 +124,7 @@ class Encoder(nn.Module):
         # BLSTM
         total_length = x.size(1)  # get the max sequence length
         packed_input = pack_padded_sequence(x, input_lengths, batch_first=True)
+        self.rnn.flatten_parameters()
         packed_output, _ = self.rnn(packed_input)
         output, _ = pad_packed_sequence(packed_output,
                                         batch_first=True,

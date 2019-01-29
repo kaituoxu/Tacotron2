@@ -19,11 +19,11 @@ from audio_process import load_wav
 
 class LJSpeechDataset(data.Dataset):
     
-    def __init__(self, path, csv_name='metadata.csv',
+    def __init__(self, wav_path, csv_file='data/metadata.csv',
                  text_transformer=None, audio_transformer=None,
                  sample_rate=22050, sort=True):
-        self.path = path
-        self.metadata = pd.read_csv(f'{path}/{csv_name}', sep='|',
+        self.wav_path = wav_path
+        self.metadata = pd.read_csv(f'{csv_file}', sep='|',
                                     names=['wav', 'text', 'norm_text'],
                                     usecols=['wav', 'norm_text'],
                                     quoting=csv.QUOTE_NONE)  # not ignore quote in string
@@ -33,7 +33,7 @@ class LJSpeechDataset(data.Dataset):
         self.sample_rate = sample_rate
         if sort:
             self.metadata['length'] = self.metadata['wav'].apply(
-                    lambda x: librosa.get_duration(filename=f'{path}/wavs/{x}.wav'))
+                    lambda x: librosa.get_duration(filename=f'{wav_path}/wavs/{x}.wav'))
             self.metadata.sort_values(by=['length'], inplace=True, ascending=False)
 
     def __getitem__(self, index):
@@ -59,7 +59,7 @@ class LJSpeechDataset(data.Dataset):
 
     def _get_audio(self, index):
         filename = self.metadata.iloc[index]['wav']
-        audio = load_wav(f'{self.path}/wavs/{filename}.wav', self.sample_rate)
+        audio = load_wav(f'{self.wav_path}/wavs/{filename}.wav', self.sample_rate)
         if self.audio_transformer:
             audio = self.audio_transformer(audio)
         return torch.FloatTensor(audio)
@@ -166,8 +166,10 @@ class TextAudioCollate(object):
 if __name__ == '__main__':
     # Test LJSpeechDataset
     import sys
-    path = sys.argv[1]
-    dataset = LJSpeechDataset(path)
+    import os
+    wav_path = sys.argv[1]
+    csv_file = os.path.join(wav_path, 'metadata.csv')
+    dataset = LJSpeechDataset(wav_path, csv_file)
     print(len(dataset))
     for i, data in enumerate(dataset):
         text, audio = data
@@ -194,7 +196,7 @@ if __name__ == '__main__':
     from audio_process import spectrogram
     from text_process import text_to_sequence
 
-    dataset = LJSpeechDataset(path, text_transformer=text_to_sequence,
+    dataset = LJSpeechDataset(wav_path, csv_file, text_transformer=text_to_sequence,
                               audio_transformer=spectrogram)
     batch_sampler = RandomBucketBatchSampler(dataset, batch_size=5, drop_last=False)
     collate_fn = TextAudioCollate()
