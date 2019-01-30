@@ -17,6 +17,8 @@ class FeaturePredictNetLoss(nn.Module):
         """
         feat_predict, feat_residual_predict, stop_tokens_predict, _ = input
         feat_target, stop_tokens_target = target
+        stop_tokens_predict = stop_tokens_predict.view(-1, 1)
+        stop_tokens_target = stop_tokens_target.view(-1, 1)
 
         feat_loss = nn.MSELoss()(feat_predict, feat_target) + \
                     nn.MSELoss()(feat_residual_predict, feat_target)

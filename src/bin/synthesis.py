@@ -9,6 +9,7 @@ import os
 import librosa
 import matplotlib.pyplot as plt
 import torch
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from audio_process import inv_spectrogram, save_wav
 from model import FeaturePredictNet
@@ -62,23 +63,43 @@ def synthesis(args):
                 feat_pred = feat_outputs + feat_residual_outputs
                 # Visualize spectrogram
                 if args.show_spect:
-                    plt.clf()
-                    plt.imshow(feat_pred[0].cpu().numpy().T, aspect='equal', origin='lower')
-                    attn_file = os.path.join(args.out_dir, f"{filename}_spec")
-                    plt.savefig(attn_file, dpi=1000)
+                    spect_file = os.path.join(args.out_dir, f"{filename}_spec")
+                    show_spectrogram(feat_pred, spect_file)
                 # Visualize attention
                 if args.show_attn:
-                    plt.clf()
                     attn = attention_weights[0].cpu().numpy().T # [Ti, To]
-                    plt.imshow(attn, aspect='equal', origin='lower')
-                    plt.colorbar()
                     attn_file = os.path.join(args.out_dir, f"{filename}_attn")
-                    plt.savefig(attn_file, dpi=1000)
+                    show_attention(attn, attn_file)
                 # Reconstruct audio using Griffin-Lim & Save
                 audio = inv_spectrogram(feat_pred[0].cpu().numpy().T)
                 audio_path = os.path.join(args.out_dir, f"{filename}.wav")
                 save_wav(audio, audio_path)
-                if i == 1: break
+                # if i == 1: break
+
+
+def show_spectrogram(feat_pred, spect_file):
+    plt.clf()
+    plt.xlabel('Time')
+    plt.ylabel('Frequency')
+    plt.title('Spectrgram')
+    plt.imshow(feat_pred[0].cpu().numpy().T, aspect='equal', origin='lower')
+    plt.savefig(spect_file)#, dpi=1000)
+
+
+def show_attention(attn, attn_file):
+    # To make colorbar same height with attention figure:
+    plt.clf()
+    plt.xlabel('Output')
+    plt.ylabel('Input')
+    plt.title('Attention')
+    ax = plt.gca()
+    im = ax.imshow(attn, aspect='equal', origin='lower')
+    # create an axes on the right side of ax. The width of cax will be 5%
+    # of ax and the padding between cax and ax will be fixed at 0.05 inch.
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    plt.colorbar(im, cax=cax)
+    plt.savefig(attn_file)#, dpi=1000)
 
 
 if __name__ == '__main__':

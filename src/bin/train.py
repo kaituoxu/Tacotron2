@@ -61,8 +61,7 @@ def main(args):
                               hparams.feature_dim)
     # print(model)
     if args.use_cuda:
-        # TODO: to use below need to generate mask in data.py but not model.py
-        # model = torch.nn.DataParallel(model)
+        model = torch.nn.DataParallel(model)
         model.cuda()
     # Build criterion
     criterion = FeaturePredictNetLoss()

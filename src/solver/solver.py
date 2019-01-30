@@ -25,6 +25,7 @@ class Solver(object):
         self.continue_from = args.continue_from
         self.model_path = args.model_path
         # logging
+        self.step = 0
         self.print_freq = args.print_freq
         # visualizing loss using visdom
         self.tr_loss = torch.Tensor(self.epochs)
@@ -48,10 +49,10 @@ class Solver(object):
         if self.continue_from:
             print('Loading checkpoint model %s' % self.continue_from)
             package = torch.load(self.continue_from)
-            # if self.use_cuda:
-            #     self.model.module.load_state_dict(package['state_dict'])
-            # else:
-            self.model.load_state_dict(package['state_dict'])
+            if self.use_cuda:
+                self.model.module.load_state_dict(package['state_dict'])
+            else:
+                self.model.load_state_dict(package['state_dict'])
             self.optimizer.load_state_dict(package['optim_dict'])
             self.start_epoch = int(package.get('epoch', 1))
             self.tr_loss[:self.start_epoch] = package['tr_loss'][:self.start_epoch]
@@ -83,26 +84,21 @@ class Solver(object):
             if self.checkpoint:
                 file_path = os.path.join(
                     self.save_folder, 'epoch%d.pth.tar' % (epoch + 1))
-                # if self.use_cuda:
-                #     torch.save(self.model.module.serialize(self.model.module,
-                #                                         self.optimizer, epoch + 1,
-                #                                         tr_loss=self.tr_loss,
-                #                                         cv_loss=self.cv_loss),
-                #             file_path)
-                # else:
-                torch.save(self.model.serialize(self.model,
-                                                self.optimizer, epoch + 1,
-                                                tr_loss=self.tr_loss,
-                                                cv_loss=self.cv_loss),
+                model = self.model.module if self.use_cuda else self.model
+                torch.save(model.serialize(model,
+                                           self.optimizer, epoch + 1,
+                                           tr_loss=self.tr_loss,
+                                           cv_loss=self.cv_loss),
                            file_path)
                 print('Saving checkpoint model to %s' % file_path)
             else:
                 # Save the last model
+                model = self.model.module if self.use_cuda else self.model
                 file_path = os.path.join(self.save_folder, self.model_path)
-                torch.save(self.model.serialize(self.model,
-                                                self.optimizer, epoch + 1,
-                                                tr_loss=self.tr_loss,
-                                                cv_loss=self.cv_loss),
+                torch.save(model.serialize(model,
+                                           self.optimizer, epoch + 1,
+                                           tr_loss=self.tr_loss,
+                                           cv_loss=self.cv_loss),
                            file_path)
                 print('Only save the last model %s' % file_path)
 
@@ -141,14 +137,16 @@ class Solver(object):
             vis_iters_loss = torch.Tensor(len(data_loader))
 
         for i, (data) in enumerate(data_loader):
-            text_padded, input_lengths, feat_padded, stop_token_padded, output_lengths = data
+            self.step += 1
+            text_padded, input_lengths, feat_padded, stop_token_padded, encoder_mask, decoder_mask = data
             if self.use_cuda:
                 text_padded = text_padded.cuda()
                 input_lengths = input_lengths.cuda()
                 feat_padded = feat_padded.cuda()
                 stop_token_padded = stop_token_padded.cuda()
-                output_lengths = output_lengths.cuda()
-            y_pred = self.model(text_padded, input_lengths, feat_padded, output_lengths)
+                encoder_mask = encoder_mask.cuda()
+                decoder_mask = decoder_mask.cuda()
+            y_pred = self.model(text_padded, input_lengths, feat_padded, encoder_mask, decoder_mask)
             y_target = (feat_padded, stop_token_padded)
             loss = self.criterion(y_pred, y_target)
             self.optimizer.zero_grad()
@@ -160,9 +158,10 @@ class Solver(object):
 
             if i % self.print_freq == 0:
                 print('Epoch {0} | Iter {1} | Average Loss {2:.3f} | '
-                      'Current Loss {3:.6f} | {4:.1f} ms/batch'.format(
+                      'Current Loss {3:.3f} | {4:.1f} ms/batch | {5} step'.format(
                           epoch + 1, i + 1, total_loss / (i + 1),
-                          loss.item(), 1000 * (time.time() - start) / (i + 1)),
+                          loss.item(), 1000 * (time.time() - start) / (i + 1),
+                          self.step),
                       flush=True)
 
             # visualizing loss using visdom

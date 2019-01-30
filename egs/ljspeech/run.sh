@@ -4,22 +4,22 @@
 # Author: Kaituo XU (NPU-ASLP)
 
 wav_dir=/home/ktxu/workspace/data/LJSpeech-1.1
-csv_file=data/cv10.csv
+csv_file=data/train.csv
 stage=1
 
 # Training
 id=0
 use_cuda=1
-epochs=1000
+epochs=500
 # minibatch
-batch_size=10
+batch_size=16
 # optimizer
 lr=1e-3
-l2=0
+l2=1e-6
 # save and load model
 checkpoint=0
 # log and visualize
-print_freq=1
+print_freq=10
 visdom=0
 visdom_id="Taco2 training"
 

@@ -159,8 +159,21 @@ class TextAudioCollate(object):
             output_lengths[i] = mel.size(1)
         mel_padded = mel_padded.transpose(1, 2)  # [N, To, D]
 
-        # print(text_padded.size(), input_lengths.size(), mel_padded.size(), gate_padded.size(), output_lengths.size())
-        return text_padded, input_lengths, mel_padded, gate_padded, output_lengths
+        # Generate mask
+        encoder_mask = get_mask_from_lengths(input_lengths)
+        decoder_mask = get_mask_from_lengths(output_lengths)
+
+        return text_padded, input_lengths, mel_padded, gate_padded, encoder_mask, decoder_mask
+
+
+def get_mask_from_lengths(lengths):
+    """Mask position is set to 1 for Tensor.masked_fill(mask, value)"""
+    N = lengths.size(0)
+    T = torch.max(lengths).item()
+    mask = torch.zeros(N, T)
+    for i in range(N):
+        mask[i, lengths[i]:] = 1
+    return mask.byte()
 
 
 if __name__ == '__main__':

@@ -36,16 +36,16 @@ class FeaturePredictNet(nn.Module):
                                postnet_num_convs, postnet_filter_size, postnet_kernel_size,
                                max_decoder_steps)
 
-    def forward(self, text_padded, input_lengths, feat_padded, feat_lengths):
+    def forward(self, text_padded, input_lengths, feat_padded, encoder_mask, decoder_mask):
         encoder_padded_outputs = self.encoder(text_padded, input_lengths)
         feat_outputs, feat_residual_outputs, stop_tokens, attention_weights \
-            = self.decoder(encoder_padded_outputs, input_lengths, feat_padded, feat_lengths)
+            = self.decoder(encoder_padded_outputs, encoder_mask, feat_padded, decoder_mask)
         return feat_outputs, feat_residual_outputs, stop_tokens, attention_weights
 
     def inference(self, text_padded, input_lengths):
         encoder_padded_outputs = self.encoder(text_padded, input_lengths)
         feat_outputs, feat_residual_outputs, stop_tokens, attention_weights \
-            = self.decoder.inference(encoder_padded_outputs, input_lengths)
+            = self.decoder.inference(encoder_padded_outputs)
         return feat_outputs, feat_residual_outputs, stop_tokens, attention_weights
 
     @classmethod
@@ -167,13 +167,12 @@ class Decoder(nn.Module):
         self.postnet = PostNet(feature_dim, postnet_num_convs,
                                postnet_filter_size, postnet_kernel_size)
 
-    def forward(self, encoder_padded_outputs, encoder_lengths,
-                feat_padded, feat_lengths):
+    def forward(self, encoder_padded_outputs, encoder_mask,
+                feat_padded, decoder_mask):
         """TODO: merge forward() and inference() or not?
         Args:
             feat_padded: [N, To, D]
             encoder_padded_outputs: [N, Ti, H]
-            encoder_lengths: [N]
         Returns:
         """
         # Init
@@ -181,7 +180,8 @@ class Decoder(nn.Module):
         go_frame = self._init_go_frame(encoder_padded_outputs)
         expand_feat = torch.cat((go_frame, feat_padded), dim=1) #[N, To+1, D]
         # init rnn state and attention
-        self._init_state(encoder_padded_outputs, encoder_lengths)
+        self._init_state(encoder_padded_outputs)
+        self.encoder_mask = encoder_mask
 
         # Forward
         feat_outputs, stop_tokens, attention_weights = [], [], []
@@ -202,21 +202,21 @@ class Decoder(nn.Module):
         feat_residual_outputs = self.postnet(feat_outputs)
 
         # Mask
-        decoder_mask = get_mask_from_lengths(feat_padded, feat_lengths)
         decoder_mask = decoder_mask.unsqueeze(-1) # [N, To, 1]
         feat_outputs = feat_outputs.masked_fill(decoder_mask, 0.0)
         feat_residual_outputs = feat_residual_outputs.masked_fill(decoder_mask, 0.0)
         attention_weights = attention_weights.masked_fill(decoder_mask, 0.0)
-        stop_tokens = stop_tokens.masked_fill(decoder_mask.squeeze(-1), 1e3)  # sigmoid(1e3) = 1, log(1) = 0
+        stop_tokens = stop_tokens.masked_fill(decoder_mask.squeeze(), 1e3)  # sigmoid(1e3) = 1, log(1) = 0
         return feat_outputs, feat_residual_outputs, stop_tokens, attention_weights
 
-    def inference(self, encoder_padded_outputs, encoder_lengths):
+    def inference(self, encoder_padded_outputs):
         """Inference one utterance."""
         # Init
         # get go frame
         go_frame = self._init_go_frame(encoder_padded_outputs).squeeze(1)
         # init rnn state and attention
-        self._init_state(encoder_padded_outputs, encoder_lengths)
+        self._init_state(encoder_padded_outputs)
+        self.encoder_mask = None
 
         # Forward
         feat_outputs, stop_tokens, attention_weights = [], [], []
@@ -249,10 +249,9 @@ class Decoder(nn.Module):
         go_frame = tensor.new_zeros(N, 1, self.feature_dim)
         return go_frame
 
-    def _init_state(self, encoder_padded_outputs, lengths):
+    def _init_state(self, encoder_padded_outputs):
         """encoder_padded_outputs: [N, Ti, ...]"""
         N, Ti = encoder_padded_outputs.size()[:2]
-        assert Ti == torch.max(lengths).item()
         # Init LSTMCell state
         self.h_list = [encoder_padded_outputs.new_zeros(N, self.decoder_hidden_size),
                        encoder_padded_outputs.new_zeros(N, self.decoder_hidden_size)]
@@ -261,8 +260,6 @@ class Decoder(nn.Module):
         # Init attention
         self.cumulative_attention_weight = encoder_padded_outputs.new_zeros(N, Ti)
         self.attention_context = encoder_padded_outputs.new_zeros(N, self.encoder_hidden_size)
-        # Generate encoder mask
-        self.encoder_mask = get_mask_from_lengths(encoder_padded_outputs, lengths)
         # Keep encoder_padded_outputs
         self.encoder_padded_outputs = encoder_padded_outputs
 
@@ -287,16 +284,6 @@ class Decoder(nn.Module):
         feat_output = self.feature_linear(linear_input)
         stop_token = self.stop_linear(linear_input)
         return feat_output, stop_token, attention_weight
-
-
-def get_mask_from_lengths(tensor, lengths):
-    """Mask position is set to 1 for Tensor.masked_fill(mask, value)"""
-    N = lengths.size(0)
-    T = torch.max(lengths).item()
-    mask = tensor.new_zeros(N, T)
-    for i in range(N):
-        mask[i, lengths[i]:] = 1
-    return mask.byte()
 
 
 class PreNet(nn.Module):
