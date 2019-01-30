@@ -81,7 +81,7 @@ def show_spectrogram(feat_pred, spect_file):
     plt.clf()
     plt.xlabel('Time')
     plt.ylabel('Frequency')
-    plt.title('Spectrgram')
+    plt.title('Spectrogram')
     plt.imshow(feat_pred[0].cpu().numpy().T, aspect='equal', origin='lower')
     plt.savefig(spect_file)#, dpi=1000)
 

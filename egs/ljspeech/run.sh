@@ -18,6 +18,7 @@ lr=1e-3
 l2=1e-6
 # save and load model
 checkpoint=0
+continue_from=""
 # log and visualize
 print_freq=10
 visdom=0
@@ -60,6 +61,7 @@ if [ $stage -le 1 ]; then
         --l2 $l2 \
         --save_folder $expdir \
         --checkpoint $checkpoint \
+        --continue_from "$continue_from" \
         --print_freq $print_freq \
         --visdom $visdom \
         --visdom_id "$visdom_id"
